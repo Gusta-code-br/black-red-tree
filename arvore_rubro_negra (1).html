@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Árvore Rubro-Negra — Visualizador</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; background: #fff; color: #1a1a1a; overflow: hidden; }
+
+/* ── topbar ── */
+#topbar {
+  height: 54px; background: #111; color: #fff;
+  display: flex; align-items: center; gap: 16px; padding: 0 22px;
+  border-bottom: 3px solid #e53e3e; flex-shrink: 0;
+}
+#topbar h1 { font-size: 20px; font-weight: 700; }
+#topbar h1 span { color: #e53e3e; }
+.tag { font-size: 10px; background: #e53e3e; padding: 3px 8px; border-radius: 4px; font-weight: 800; letter-spacing: .5px; }
+.topbar-right { margin-left: auto; font-size: 12px; color: #666; }
+
+/* ── layout ── */
+#app { display: flex; height: calc(100vh - 54px); }
+
+/* ── canvas area ── */
+#canvas-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* controls */
+#controls-bar {
+  background: #f5f5f5; border-bottom: 1px solid #e0e0e0;
+  padding: 12px 18px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0;
+}
+#val-input {
+  width: 110px; height: 42px; padding: 0 12px;
+  border: 2px solid #ccc; border-radius: 8px;
+  font-size: 17px; font-weight: 700; color: #111; background: #fff;
+}
+#val-input:focus { outline: none; border-color: #7c3aed; }
+.btn {
+  height: 42px; padding: 0 18px; border-radius: 8px;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  border: 2px solid transparent; white-space: nowrap;
+  display: flex; align-items: center; gap: 5px; transition: all .15s;
+}
+.btn-insert { background: #111; color: #fff; border-color: #111; }
+.btn-insert:hover { background: #333; }
+.btn-search { background: #fff; color: #0f6e56; border-color: #0f6e56; }
+.btn-search:hover { background: #e1f5ee; }
+.btn-delete { background: #fff; color: #c05621; border-color: #c05621; }
+.btn-delete:hover { background: #fff5eb; }
+.btn-clear  { background: #fff; color: #e53e3e; border-color: #e53e3e; }
+.btn-clear:hover { background: #fff5f5; }
+.sep { width: 1px; height: 30px; background: #ddd; margin: 0 2px; }
+.preset-label { font-size: 12px; color: #999; font-weight: 700; }
+.preset-btn {
+  height: 34px; padding: 0 11px;
+  border: 1.5px solid #ddd; border-radius: 7px;
+  font-size: 12px; font-weight: 600; background: #fff; color: #555; cursor: pointer; transition: all .15s;
+}
+.preset-btn:hover { background: #f0eeff; border-color: #7c3aed; color: #7c3aed; }
+.btn-undo {
+  background: #fff; color: #444; border-color: #ccc;
+  opacity: 1; transition: all .15s;
+}
+.btn-undo:hover:not(:disabled) { background: #f5f5f5; border-color: #aaa; }
+.btn-undo:disabled { opacity: .35; cursor: not-allowed; }
+#step-indicator {
+  font-size: 11px; color: #aaa; font-weight: 700;
+  white-space: nowrap; padding: 0 4px;
+  letter-spacing: .3px;
+}
+
+/* SVG board */
+#board-wrap {
+  flex: 1; overflow: hidden; position: relative; background: #fff;
+  cursor: grab;
+}
+#board-wrap.dragging { cursor: grabbing; }
+#board-wrap svg { width: 100%; height: 100%; display: block; }
+
+/* legend */
+#legend {
+  border-top: 1px solid #eee; padding: 8px 20px;
+  display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+  background: #fafafa; flex-shrink: 0; font-size: 12px; color: #555; font-weight: 600;
+}
+.leg-item { display: flex; align-items: center; gap: 7px; }
+.leg-dot { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; border: 2px solid rgba(0,0,0,.1); }
+.leg-nil-box {
+  width: 26px; height: 14px; background: #1a1a1a; border: 1.5px dashed #888;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 7px; font-weight: 800; color: #fff; flex-shrink: 0;
+}
+.leg-dashed { width: 24px; height: 0; border-top: 2px dashed #7c3aed; }
+.drag-hint { margin-left: auto; font-size: 11px; color: #bbb; }
+
+/* ── sidebar ── */
+#sidebar {
+  width: 370px; flex-shrink: 0; background: #fff;
+  border-left: 1px solid #e0e0e0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* stats */
+.sb-title { font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #aaa; padding: 12px 16px 5px; }
+#stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; border-bottom: 1px solid #f0f0f0; }
+.stat-box { padding: 8px 13px 11px; border-right: 1px solid #f0f0f0; }
+.stat-box:last-child { border-right: none; }
+.stat-lbl { font-size: 10px; color: #aaa; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
+.stat-val { font-size: 28px; font-weight: 800; color: #111; line-height: 1; }
+
+/* inorder */
+#inorder-wrap { padding: 8px 16px 10px; border-bottom: 1px solid #f0f0f0; }
+.inorder-lbl { font-size: 10px; color: #aaa; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+#inorder-val {
+  font-size: 11px; color: #555; word-break: break-all; line-height: 1.6;
+  max-height: 48px; overflow-y: auto; font-family: 'Courier New', monospace; font-weight: 600;
+}
+
+/* rotation diagram */
+#rot-diagram { padding: 10px 16px 12px; border-bottom: 1px solid #f0f0f0; flex-shrink: 0; }
+#rot-svg-wrap svg { width: 100%; height: auto; }
+
+/* log */
+#log-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#log-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 4px; flex-shrink: 0; }
+.log-clear-btn { font-size: 11px; color: #bbb; border: none; background: none; cursor: pointer; font-weight: 600; }
+.log-clear-btn:hover { color: #e53e3e; }
+#log-list { flex: 1; overflow-y: auto; padding: 4px 0; display: flex; flex-direction: column; }
+#log-list::-webkit-scrollbar { width: 5px; }
+#log-list::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 3px; }
+
+.log-entry { padding: 9px 16px 10px; border-bottom: 1px solid #f7f7f7; animation: fadein .2s ease; }
+@keyframes fadein { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+.log-hrow { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.log-badge { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .4px; flex-shrink: 0; }
+.b-insert { background: #111; color: #fff; }
+.b-delete { background: #e53e3e; color: #fff; }
+.b-search { background: #0f6e56; color: #fff; }
+.b-info   { background: #7c3aed; color: #fff; }
+.b-warn   { background: #d97706; color: #fff; }
+.b-undo   { background: #555; color: #fff; }
+.log-title { font-size: 13px; font-weight: 700; color: #111; }
+.log-ops { display: flex; flex-direction: column; gap: 4px; }
+.log-op { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: #444; line-height: 1.5; }
+.log-icon { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; margin-top: 1px; font-weight: 700; }
+.ic-rot  { background: #ede9ff; color: #7c3aed; }
+.ic-col  { background: #fef3c7; color: #92400e; }
+.ic-ok   { background: #d1fae5; color: #065f46; }
+.ic-bal  { background: #dbeafe; color: #1e40af; }
+.ic-warn { background: #fee2e2; color: #b91c1c; }
+.log-reason {
+  margin-top: 3px; margin-left: 25px;
+  font-size: 11px; color: #6d28d9; font-weight: 600;
+  background: #f5f3ff; border-left: 3px solid #7c3aed;
+  padding: 3px 7px; border-radius: 0 4px 4px 0; line-height: 1.5;
+}
+
+/* props */
+#props-wrap { padding: 10px 16px 14px; border-top: 1px solid #f0f0f0; flex-shrink: 0; }
+.prop-item { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 7px; font-size: 12px; color: #444; line-height: 1.5; }
+.prop-item:last-child { margin-bottom: 0; }
+.prop-num { width: 20px; height: 20px; border-radius: 50%; background: #111; color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+
+/* SVG tree elements */
+.tree-edge { stroke: #ddd; stroke-width: 2; fill: none; }
+.tree-edge.path-edge { stroke: #7c3aed; stroke-width: 3; stroke-dasharray: 7,4; }
+.nil-edge { stroke: #ebebeb; stroke-width: 1.5; stroke-dasharray: 4,3; fill: none; }
+.nil-box { fill: #1a1a1a; }
+.nil-box-dashed { fill: none; stroke: #888; stroke-width: 1; stroke-dasharray: 3,2; }
+.nil-label { fill: #fff; font-size: 8px; font-weight: 700; font-family: 'Segoe UI', system-ui, sans-serif; }
+.nil-sub { fill: #999; font-size: 7px; font-family: 'Segoe UI', system-ui, sans-serif; }
+.node-shadow { filter: drop-shadow(0 3px 6px rgba(0,0,0,.18)); }
+.node-circle { stroke-width: 2; }
+.node-label { fill: #fff; font-weight: 800; font-family: 'Segoe UI', system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+.node-color-label { font-weight: 600; font-family: 'Segoe UI', system-ui, sans-serif; text-anchor: middle; font-size: 10px; }
+.root-ring1 { fill: none; stroke-width: 2; }
+.root-ring2 { fill: none; stroke-width: 1.5; stroke-dasharray: 5,4; }
+.highlight-ring { fill: none; stroke-width: 3; stroke-dasharray: 5,3; }
+.search-ring { fill: none; stroke: #7c3aed; stroke-width: 2.5; stroke-dasharray: 5,3; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>Árvore <span>Rubro</span>-Negra</h1>
+  <div class="tag">Red-Black Tree</div>
+  <div class="topbar-right">Estrutura de Dados II — UniRV · Fasoft</div>
+</div>
+
+<div id="app">
+  <!-- left: canvas -->
+  <div id="canvas-area">
+    <div id="controls-bar">
+      <input type="number" id="val-input" placeholder="Valor…" min="-9999" max="9999"/>
+      <button class="btn btn-insert" onclick="insertVal()">⊕ Inserir</button>
+      <button class="btn btn-search" onclick="searchVal()">⌕ Buscar</button>
+      <button class="btn btn-delete" onclick="deleteVal()">⊖ Remover</button>
+      <button class="btn btn-clear"  onclick="clearTree()">✕ Limpar</button>
+      <div class="sep"></div>
+      <button class="btn btn-undo" id="btn-undo" onclick="undoStep()" disabled title="Desfazer (Ctrl+Z)">↩ Voltar</button>
+      <button class="btn btn-undo" id="btn-redo" onclick="redoStep()" disabled title="Refazer (Ctrl+Y)">↪ Avançar</button>
+      <span id="step-indicator">passo 0 / 0</span>
+      <div class="sep"></div>
+      <span class="preset-label">Exemplos:</span>
+      <button class="preset-btn" onclick="loadPreset([10,20,30,15,25,5,1])">Misto</button>
+      <button class="preset-btn" onclick="loadPreset([50,25,75,12,37,62,87])">Balanceada</button>
+      <button class="preset-btn" onclick="loadPreset([1,2,3,4,5,6,7])">Crescente</button>
+      <button class="preset-btn" onclick="loadPreset([7,6,5,4,3,2,1])">Decrescente</button>
+      <button class="preset-btn" onclick="loadPreset([40,20,60,10,30,50,70,5,15,25,35,45])">Grande</button>
+    </div>
+
+    <div id="board-wrap">
+      <svg id="tree-svg">
+        <defs>
+          <marker id="nil-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto">
+            <path d="M0 0L6 3L0 6z" fill="#ddd"/>
+          </marker>
+        </defs>
+        <g id="tree-g"></g>
+        <g id="empty-g">
+          <text x="50%" y="45%" text-anchor="middle" font-size="20" fill="#ccc" font-family="Segoe UI,system-ui,sans-serif" font-weight="600">🌳  Árvore vazia</text>
+          <text x="50%" y="55%" text-anchor="middle" font-size="14" fill="#ddd" font-family="Segoe UI,system-ui,sans-serif">Insira um valor ou escolha um exemplo acima</text>
+        </g>
+      </svg>
+    </div>
+
+    <div id="legend">
+      <div class="leg-item"><div class="leg-dot" style="background:#e53e3e;border-color:#c53030"></div>Nó Vermelho</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#111;border-color:#444"></div>Nó Preto</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#111;outline:3px dashed #888;outline-offset:3px"></div>Raiz</div>
+      <div class="leg-item"><div class="leg-nil-box">NIL</div>Folha NIL (preta)</div>
+      <div class="leg-item"><div class="leg-dashed"></div>Caminho de busca</div>
+      <div class="drag-hint">🖐 Arraste para navegar · Scroll para zoom</div>
+    </div>
+  </div>
+
+  <!-- right: sidebar -->
+  <div id="sidebar">
+    <div class="sb-title">Estatísticas</div>
+    <div id="stats-grid">
+      <div class="stat-box"><div class="stat-lbl">Nós</div><div class="stat-val" id="st-nodes">0</div></div>
+      <div class="stat-box"><div class="stat-lbl">Altura</div><div class="stat-val" id="st-height">0</div></div>
+      <div class="stat-box"><div class="stat-lbl">Folhas</div><div class="stat-val" id="st-leaves">0</div></div>
+    </div>
+    <div id="inorder-wrap">
+      <div class="inorder-lbl">Ordem In-order (crescente)</div>
+      <div id="inorder-val">—</div>
+    </div>
+
+    <div id="rot-diagram">
+      <div class="sb-title" style="padding:0 0 8px">Última Rotação</div>
+      <div id="rot-svg-wrap">
+        <svg viewBox="0 0 320 150" xmlns="http://www.w3.org/2000/svg" id="rot-svg">
+          <text x="160" y="78" text-anchor="middle" font-size="13" fill="#ccc" font-family="Segoe UI,system-ui,sans-serif">Nenhuma rotação ainda</text>
+        </svg>
+      </div>
+    </div>
+
+    <div id="log-section">
+      <div id="log-header">
+        <div class="sb-title" style="padding:0">Histórico de Operações</div>
+        <button class="log-clear-btn" onclick="clearLog()">Limpar</button>
+      </div>
+      <div id="log-list">
+        <div class="log-entry">
+          <div class="log-hrow"><span class="log-badge b-info">Info</span><span class="log-title">Bem-vindo!</span></div>
+          <div class="log-ops">
+            <div class="log-op"><div class="log-icon ic-ok">✓</div><span>Insira valores para construir a árvore. Arraste o canvas para navegar. O histórico cresce para baixo (mais antigo no topo).</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="props-wrap">
+      <div class="sb-title" style="padding:0 0 8px">5 Propriedades</div>
+      <div class="prop-item"><div class="prop-num">1</div><span>Todo nó é <b>vermelho</b> ou <b>preto</b>.</span></div>
+      <div class="prop-item"><div class="prop-num">2</div><span>A <b>raiz</b> é sempre <b>preta</b>.</span></div>
+      <div class="prop-item"><div class="prop-num">3</div><span>Toda folha <b>NIL</b> é <b>preta</b>.</span></div>
+      <div class="prop-item"><div class="prop-num">4</div><span>Filho de nó <b>vermelho</b> é sempre <b>preto</b>.</span></div>
+      <div class="prop-item"><div class="prop-num">5</div><span>Caminhos raiz→NIL têm igual nº de nós <b>pretos</b>.</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   RED-BLACK TREE
+═══════════════════════════════════════════════════════ */
+const RED = 0, BLACK = 1;
+
+class RBNode {
+  constructor(v) { this.val = v; this.color = RED; this.left = null; this.right = null; this.parent = null; }
+}
+
+class RBTree {
+  constructor() { this.root = null; }
+
+  insert(v) {
+    const n = new RBNode(v);
+    if (!this.root) {
+      this.root = n; this.root.color = BLACK;
+      return { msg: `Inserido ${v} como raiz.`, ops: [{ t: 'ok', s: `Nó ${v} inserido.`, reason: `Primeiro nó da árvore → vira raiz, pintada PRETA (Propriedade 2).` }], rot: null };
+    }
+    let cur = this.root, par = null;
+    while (cur) {
+      par = cur;
+      if (v < cur.val) cur = cur.left;
+      else if (v > cur.val) cur = cur.right;
+      else return { msg: `${v} já existe.`, ops: [{ t: 'warn', s: `Duplicatas não permitidas.`, reason: null }], rot: null };
+    }
+    n.parent = par;
+    const side = v < par.val ? 'esquerdo' : 'direito';
+    if (v < par.val) par.left = n; else par.right = n;
+    const ops = [{
+      t: 'ok', s: `Nó ${v} → filho ${side} de ${par.val}.`,
+      reason: `Nós novos entram VERMELHOS para não alterar a contagem de pretos por caminho (Prop. 5). Se o pai for preto, nenhum ajuste é necessário.`
+    }];
+    const rot = this._fixInsert(n, ops);
+    return { msg: `✓ Inserido ${v}`, ops, rot };
+  }
+
+  _fixInsert(n, ops) {
+    let lastRot = null;
+    while (n.parent && n.parent.color === RED) {
+      const p = n.parent, g = p.parent;
+      if (!g) break;
+      const viol = `Violação Prop.4: ${n.val}(VERM) com pai ${p.val}(VERM). Dois vermelhos consecutivos proibidos.`;
+      if (p === g.left) {
+        const u = g.right;
+        if (u && u.color === RED) {
+          p.color = BLACK; u.color = BLACK; g.color = RED;
+          ops.push({ t: 'col', s: `Caso 1: tio ${u.val} é VERM → Recoloração.`, reason: `${viol}\nTio ${u.val} é VERMELHO → pintar pai (${p.val}) e tio (${u.val}) de PRETO, avô (${g.val}) de VERM. Preserva contagem de pretos (Prop.5) sem rotação. Conflito pode subir para o avô.` });
+          n = g;
+        } else {
+          if (n === p.right) {
+            ops.push({ t: 'rot', s: `Caso 2: ${n.val} é filho direito → Rot. Esq. em ${p.val}.`, reason: `${viol}\nTio (${u ? u.val : 'NIL'}) é PRETO, mas ${n.val} está no lado oposto ao tio. Rotação Esquerda em ${p.val} alinha ${n.val} com o avô ${g.val}, preparando para a rotação principal.` });
+            lastRot = { type: 'left', pivot: p.val, child: n.val };
+            this._rotL(p); n = p;
+          }
+          const np = n.parent;
+          ops.push({ t: 'rot', s: `Caso 3: Rot. Dir. em avô ${g.val}. ${np.val}→PRETO, ${g.val}→VERM.`, reason: `Tio (${u ? u.val : 'NIL'}) é PRETO, caminho alinhado à esquerda. Rotação Direita em ${g.val} coloca ${np.val} no lugar do avô. ${np.val}→PRETO e ${g.val}→VERM mantêm a contagem de pretos (Prop.5) e eliminam os dois vermelhos consecutivos (Prop.4). ✓ Violação corrigida.` });
+          lastRot = { type: 'right', pivot: g.val, child: np.val };
+          np.color = BLACK; g.color = RED; this._rotR(g);
+        }
+      } else {
+        const u = g.left;
+        if (u && u.color === RED) {
+          p.color = BLACK; u.color = BLACK; g.color = RED;
+          ops.push({ t: 'col', s: `Caso 1: tio ${u.val} é VERM → Recoloração.`, reason: `${viol}\nTio ${u.val} é VERMELHO → pai (${p.val}) e tio (${u.val})→PRETO, avô (${g.val})→VERM. Preserva Prop.5 sem rotação.` });
+          n = g;
+        } else {
+          if (n === p.left) {
+            ops.push({ t: 'rot', s: `Caso 2: ${n.val} é filho esquerdo → Rot. Dir. em ${p.val}.`, reason: `${viol}\nTio (${u ? u.val : 'NIL'}) é PRETO mas ${n.val} está no lado oposto. Rotação Direita em ${p.val} alinha ${n.val} com o avô ${g.val}.` });
+            lastRot = { type: 'right', pivot: p.val, child: n.val };
+            this._rotR(p); n = p;
+          }
+          const np = n.parent;
+          ops.push({ t: 'rot', s: `Caso 3: Rot. Esq. em avô ${g.val}. ${np.val}→PRETO, ${g.val}→VERM.`, reason: `Tio (${u ? u.val : 'NIL'}) é PRETO, caminho alinhado à direita. Rotação Esquerda em ${g.val} coloca ${np.val} no lugar do avô. ${np.val}→PRETO, ${g.val}→VERM. ✓ Violação corrigida.` });
+          lastRot = { type: 'left', pivot: g.val, child: np.val };
+          np.color = BLACK; g.color = RED; this._rotL(g);
+        }
+      }
+      if (n === this.root) break;
+    }
+    this.root.color = BLACK;
+    const hasRot = ops.some(o => o.t === 'rot'), hasCol = ops.some(o => o.t === 'col');
+    ops.push({ t: 'bal', s: `Balanceamento concluído.`, reason: hasRot ? `Rotações e recolorações aplicadas. Todas as propriedades RN restauradas.` : hasCol ? `Apenas recolorações aplicadas. Estrutura da árvore inalterada.` : `Pai PRETO — nenhuma violação ocorreu, nenhum ajuste necessário.` });
+    return lastRot;
+  }
+
+  _rotL(x) { const y = x.right; if (!y) return; x.right = y.left; if (y.left) y.left.parent = x; y.parent = x.parent; if (!x.parent) this.root = y; else if (x === x.parent.left) x.parent.left = y; else x.parent.right = y; y.left = x; x.parent = y; }
+  _rotR(x) { const y = x.left; if (!y) return; x.left = y.right; if (y.right) y.right.parent = x; y.parent = x.parent; if (!x.parent) this.root = y; else if (x === x.parent.right) x.parent.right = y; else x.parent.left = y; y.right = x; x.parent = y; }
+
+  search(v) {
+    let cur = this.root; const path = [];
+    while (cur) { path.push(cur.val); if (v === cur.val) return { found: cur, path }; cur = v < cur.val ? cur.left : cur.right; }
+    return { found: null, path };
+  }
+
+  delete(v) {
+    const z = this._find(v);
+    if (!z) return { msg: `✗ ${v} não encontrado.`, ops: [{ t: 'warn', s: `Valor ${v} não existe na árvore.`, reason: null }], rot: null };
+    const wasRed = z.color === RED;
+    this._rbDelete(z);
+    return {
+      msg: `✓ Removido ${v}`, rot: null,
+      ops: [
+        { t: 'ok', s: `Nó ${v} removido.`, reason: wasRed ? `Nó era VERMELHO → nenhuma propriedade RN afetada. Contagem de pretos por caminho inalterada.` : `Nó era PRETO → a remoção reduziu a contagem de pretos em algum caminho. O algoritmo fix-delete restaura a Prop.5 via rotações/recolorações.` },
+        { t: 'bal', s: `Propriedades RN restauradas.`, reason: wasRed ? `Nenhum ajuste adicional necessário.` : `Rotações e/ou recolorações aplicadas para igualar a contagem de pretos em todos os caminhos raiz→NIL.` }
+      ]
+    };
+  }
+  _find(v) { let c = this.root; while (c) { if (v === c.val) return c; c = v < c.val ? c.left : c.right; } return null; }
+  _rbDelete(z) {
+    let y = z, oC = y.color, x, xp;
+    if (!z.left) { x = z.right; xp = z.parent; this._tp(z, z.right); }
+    else if (!z.right) { x = z.left; xp = z.parent; this._tp(z, z.left); }
+    else { y = this._min(z.right); oC = y.color; x = y.right; if (y.parent === z) { xp = y; } else { xp = y.parent; this._tp(y, y.right); y.right = z.right; if (y.right) y.right.parent = y; } this._tp(z, y); y.left = z.left; if (y.left) y.left.parent = y; y.color = z.color; }
+    if (oC === BLACK) this._fixDel(x, xp);
+  }
+  _tp(u, v) { if (!u.parent) this.root = v; else if (u === u.parent.left) u.parent.left = v; else u.parent.right = v; if (v) v.parent = u.parent; }
+  _min(n) { while (n.left) n = n.left; return n; }
+  _fixDel(x, xp) {
+    while (x !== this.root && (!x || x.color === BLACK)) {
+      if (!xp) break;
+      if (x === xp.left) { let w = xp.right; if (w && w.color === RED) { w.color = BLACK; xp.color = RED; this._rotL(xp); w = xp.right; } if ((!w?.left || w.left.color === BLACK) && (!w?.right || w.right.color === BLACK)) { if (w) w.color = RED; x = xp; xp = x.parent; } else { if (!w?.right || w.right.color === BLACK) { if (w?.left) w.left.color = BLACK; if (w) w.color = RED; if (w) this._rotR(w); w = xp.right; } if (w) w.color = xp.color; xp.color = BLACK; if (w?.right) w.right.color = BLACK; this._rotL(xp); x = this.root; } }
+      else { let w = xp.left; if (w && w.color === RED) { w.color = BLACK; xp.color = RED; this._rotR(xp); w = xp.left; } if ((!w?.right || w.right.color === BLACK) && (!w?.left || w.left.color === BLACK)) { if (w) w.color = RED; x = xp; xp = x?.parent; } else { if (!w?.left || w.left.color === BLACK) { if (w?.right) w.right.color = BLACK; if (w) w.color = RED; if (w) this._rotL(w); w = xp.left; } if (w) w.color = xp.color; if (xp) xp.color = BLACK; if (w?.left) w.left.color = BLACK; if (xp) this._rotR(xp); x = this.root; } }
+    }
+    if (x) x.color = BLACK;
+  }
+  height(n = this.root) { if (!n) return 0; return 1 + Math.max(this.height(n.left), this.height(n.right)); }
+  count(n = this.root) { if (!n) return 0; return 1 + this.count(n.left) + this.count(n.right); }
+  leaves(n = this.root) { if (!n) return 0; if (!n.left && !n.right) return 1; return this.leaves(n.left) + this.leaves(n.right); }
+  inorder() { const r = []; const f = n => { if (!n) return; f(n.left); r.push(n.val); f(n.right); }; f(this.root); return r; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   D3 SETUP — zoom + pan
+═══════════════════════════════════════════════════════ */
+const svg = d3.select('#tree-svg');
+const g   = d3.select('#tree-g');
+
+const zoom = d3.zoom()
+  .scaleExtent([0.2, 3])
+  .on('zoom', e => g.attr('transform', e.transform));
+
+svg.call(zoom)
+   .on('dblclick.zoom', null); // disable dblclick reset
+
+// drag cursor feedback
+const boardWrap = document.getElementById('board-wrap');
+svg.on('mousedown', () => boardWrap.classList.add('dragging'))
+   .on('mouseup mouseleave', () => boardWrap.classList.remove('dragging'));
+
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+const tree = new RBTree();
+let highlighted = new Set();
+let searchPath  = [];
+
+/* ═══════════════════════════════════════════════════════
+   STATS
+═══════════════════════════════════════════════════════ */
+function updateStats() {
+  document.getElementById('st-nodes').textContent  = tree.count();
+  document.getElementById('st-height').textContent = tree.height();
+  document.getElementById('st-leaves').textContent = tree.leaves();
+  const io = tree.inorder();
+  document.getElementById('inorder-val').textContent = io.length ? io.join(' → ') : '—';
+}
+
+/* ═══════════════════════════════════════════════════════
+   LOG  (append to bottom = oldest top, newest bottom)
+═══════════════════════════════════════════════════════ */
+function clearLog() { document.getElementById('log-list').innerHTML = ''; }
+
+function addLog(badge, bCls, title, ops) {
+  const list = document.getElementById('log-list');
+  const iconMap = { rot: ['ic-rot','↻'], col: ['ic-col','◑'], ok: ['ic-ok','✓'], bal: ['ic-bal','⊛'], warn: ['ic-warn','⚠'] };
+  const opsHTML = ops.map(op => {
+    const [cls, ico] = iconMap[op.t] || ['ic-ok','·'];
+    const rHTML = op.reason ? `<div class="log-reason">💡 ${op.reason.replace(/\n/g,'<br>')}</div>` : '';
+    return `<div class="log-op"><div class="log-icon ${cls}">${ico}</div><span>${op.s}</span></div>${rHTML}`;
+  }).join('');
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<div class="log-hrow"><span class="log-badge ${bCls}">${badge}</span><span class="log-title">${title}</span></div><div class="log-ops">${opsHTML}</div>`;
+  list.appendChild(el);          // ← append (newest at bottom)
+  list.scrollTop = list.scrollHeight; // auto-scroll to latest
+}
+
+/* ═══════════════════════════════════════════════════════
+   ROTATION DIAGRAM (SVG sidebar)
+═══════════════════════════════════════════════════════ */
+function drawRotDiagram(rot) {
+  const rsvg = document.getElementById('rot-svg');
+  if (!rot) {
+    rsvg.setAttribute('viewBox', '0 0 320 90');
+    rsvg.innerHTML = `<text x="160" y="48" text-anchor="middle" font-size="13" fill="#ccc" font-family="Segoe UI,system-ui,sans-serif">Nenhuma rotação nesta operação</text>`;
+    return;
+  }
+  rsvg.setAttribute('viewBox', '0 0 320 155');
+  const BF = '#1a1a1a', RF = '#e53e3e', PUR = '#7c3aed';
+  const R = 19;
+
+  const circ = (x, y, lbl, fill) => {
+    const fs = String(lbl).length > 3 ? 9 : 12;
+    return `<circle cx="${x}" cy="${y}" r="${R}" fill="${fill}" stroke="rgba(0,0,0,.15)" stroke-width="1.5"/>
+            <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="${fs}" font-weight="700" fill="#fff" font-family="Segoe UI,system-ui,sans-serif">${lbl}</text>`;
+  };
+  const tri = (x, y, lbl) =>
+    `<polygon points="${x},${y} ${x-13},${y+22} ${x+13},${y+22}" fill="#f0f0f0" stroke="#ccc" stroke-width="1"/>
+     <text x="${x}" y="${y+15}" text-anchor="middle" font-size="9" fill="#bbb" font-family="Segoe UI,system-ui,sans-serif">${lbl}</text>`;
+  const ln = (x1,y1,x2,y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#e0e0e0" stroke-width="1.8"/>`;
+  const label = (x,y,t) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="10" fill="#bbb" font-family="Segoe UI,system-ui,sans-serif">${t}</text>`;
+  const caption = (x,y,t) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="9" fill="#aaa" font-family="Segoe UI,system-ui,sans-serif">${t}</text>`;
+
+  const defs = `<defs><marker id="ra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M1 1.5L9 5L1 8.5" fill="none" stroke="${PUR}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker></defs>`;
+
+  let c = '';
+  const titleTxt = rot.type === 'right' ? '↷  Rotação Direita' : '↶  Rotação Esquerda';
+  c += `<text x="160" y="13" text-anchor="middle" font-size="13" font-weight="800" fill="${PUR}" font-family="Segoe UI,system-ui,sans-serif">${titleTxt}</text>`;
+
+  if (rot.type === 'right') {
+    // BEFORE: G(red) top, P(black) left-child, subtrees A(P.left) B(P.right) C(G.right)
+    // AFTER:  P(black) top, A(P.left), G(red) right-child, B(G.left) C(G.right)
+    c += label(68, 27, 'ANTES');
+    const Gx=68,Gy=50; const Px=38,Py=88; const Cx=98,Cy=88;
+    c += ln(Gx,Gy+R,Px,Py-R); c += ln(Gx,Gy+R,Cx,Cy-R);
+    c += ln(Px,Py+R,Px-16,Py+R+22); c += ln(Px,Py+R,Px+16,Py+R+22);
+    c += circ(Gx,Gy,rot.pivot,RF); c += circ(Px,Py,rot.child,BF);
+    c += tri(Px-18,Py+R+2,'A'); c += tri(Px+18,Py+R+2,'B'); c += tri(Cx,Cy-R+2,'C');
+
+    c += `<path d="M 112,65 C 138,44 182,44 208,65" fill="none" stroke="${PUR}" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ra)"/>`;
+    c += `<text x="160" y="42" text-anchor="middle" font-size="9" fill="${PUR}" font-family="Segoe UI,system-ui,sans-serif">rotar →</text>`;
+
+    c += label(250, 27, 'DEPOIS');
+    const Px2=250,Py2=50; const Ax=220,Ay=88; const Gx2=280,Gy2=88;
+    c += ln(Px2,Py2+R,Ax,Ay-R); c += ln(Px2,Py2+R,Gx2,Gy2-R);
+    c += ln(Gx2,Gy2+R,Gx2-16,Gy2+R+22); c += ln(Gx2,Gy2+R,Gx2+16,Gy2+R+22);
+    c += circ(Px2,Py2,rot.child,BF); c += circ(Gx2,Gy2,rot.pivot,RF);
+    c += tri(Ax,Ay-R+2,'A'); c += tri(Gx2-18,Gy2+R+2,'B'); c += tri(Gx2+18,Gy2+R+2,'C');
+
+    c += caption(68,143,`${rot.pivot} = avô (→VERM)`);
+    c += caption(250,143,`${rot.child} = novo pai (→PRETO)`);
+  } else {
+    // LEFT ROTATION
+    c += label(68, 27, 'ANTES');
+    const Gx=68,Gy=50; const Px=98,Py=88; const Lx=38,Ly=88;
+    c += ln(Gx,Gy+R,Lx,Ly-R); c += ln(Gx,Gy+R,Px,Py-R);
+    c += ln(Px,Py+R,Px-16,Py+R+22); c += ln(Px,Py+R,Px+16,Py+R+22);
+    c += circ(Gx,Gy,rot.pivot,RF); c += circ(Px,Py,rot.child,BF);
+    c += tri(Lx,Ly-R+2,'A'); c += tri(Px-18,Py+R+2,'B'); c += tri(Px+18,Py+R+2,'C');
+
+    c += `<path d="M 112,65 C 138,44 182,44 208,65" fill="none" stroke="${PUR}" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#ra)"/>`;
+    c += `<text x="160" y="42" text-anchor="middle" font-size="9" fill="${PUR}" font-family="Segoe UI,system-ui,sans-serif">← rotar</text>`;
+
+    c += label(250, 27, 'DEPOIS');
+    const Px2=250,Py2=50; const Gx2=220,Gy2=88; const Cx2=280,Cy2=88;
+    c += ln(Px2,Py2+R,Gx2,Gy2-R); c += ln(Px2,Py2+R,Cx2,Cy2-R);
+    c += ln(Gx2,Gy2+R,Gx2-16,Gy2+R+22); c += ln(Gx2,Gy2+R,Gx2+16,Gy2+R+22);
+    c += circ(Px2,Py2,rot.child,BF); c += circ(Gx2,Gy2,rot.pivot,RF);
+    c += tri(Gx2-18,Gy2+R+2,'A'); c += tri(Gx2+18,Gy2+R+2,'B'); c += tri(Cx2,Cy2-R+2,'C');
+
+    c += caption(68,143,`${rot.pivot} = avô (→VERM)`);
+    c += caption(250,143,`${rot.child} = novo pai (→PRETO)`);
+  }
+  rsvg.innerHTML = defs + c;
+}
+
+/* ═══════════════════════════════════════════════════════
+   D3 TREE RENDER
+═══════════════════════════════════════════════════════ */
+const NODE_R   = 26;
+const NIL_W    = 26;
+const NIL_H    = 16;
+const LEVEL_H  = 100;
+const NIL_DY   = 60;   // extra y offset for NIL nodes below their parent's level
+
+function buildD3Data(rbRoot) {
+  // Convert RBTree to a format d3.hierarchy can use
+  // We include NIL sentinel nodes as leaf children
+  const convert = (node, depth) => {
+    if (!node) return null;
+    const d = { val: node.val, color: node.color, isNil: false, depth, children: [] };
+    const left  = node.left  ? convert(node.left,  depth+1) : { val: 'NIL', isNil: true, depth: depth+1, side: 'left',  parentVal: node.val };
+    const right = node.right ? convert(node.right, depth+1) : { val: 'NIL', isNil: true, depth: depth+1, side: 'right', parentVal: node.val };
+    d.leftChild  = left;
+    d.rightChild = right;
+    if (node.left)  d.children.push(left);
+    if (node.right) d.children.push(right);
+    // Store NIL placeholders separately
+    d._nilLeft  = node.left  ? null : left;
+    d._nilRight = node.right ? null : right;
+    return d;
+  };
+  return convert(rbRoot, 0);
+}
+
+function renderTree() {
+  const emptyG = document.getElementById('empty-g');
+
+  if (!tree.root) {
+    g.selectAll('*').remove();
+    emptyG.style.display = 'block';
+    return;
+  }
+  emptyG.style.display = 'none';
+
+  // Build hierarchy using D3
+  const root = d3.hierarchy(buildD3Data(tree.root), d => d.children);
+
+  // D3 tree layout — compute x/y
+  const treeLayout = d3.tree().nodeSize([NODE_R * 3.2, LEVEL_H]);
+  treeLayout(root);
+
+  // Gather all nodes and NIL positions
+  const realNodes = root.descendants();
+  const nilNodes  = []; // { x, y, parentX, parentY }
+
+  realNodes.forEach(d => {
+    const nd = d.data;
+    // left NIL
+    if (nd._nilLeft) {
+      const nx = d.x - NODE_R * 1.3;
+      const ny = d.y + NIL_DY;
+      nilNodes.push({ x: nx, y: ny, px: d.x, py: d.y });
+    }
+    // right NIL
+    if (nd._nilRight) {
+      const nx = d.x + NODE_R * 1.3;
+      const ny = d.y + NIL_DY;
+      nilNodes.push({ x: nx, y: ny, px: d.x, py: d.y });
+    }
+  });
+
+  // compute bounding box to center
+  const allX = realNodes.map(d => d.x).concat(nilNodes.map(n => n.x));
+  const allY = realNodes.map(d => d.y).concat(nilNodes.map(n => n.y));
+  const minX = d3.min(allX) - NODE_R * 2;
+  const maxX = d3.max(allX) + NODE_R * 2;
+  const minY = d3.min(allY) - NODE_R * 2;
+  const maxY = d3.max(allY) + NODE_R * 2 + 20;
+  const W = maxX - minX;
+  const H = maxY - minY;
+
+  g.selectAll('*').remove();
+
+  const pad = 40;
+  const container = g.append('g').attr('transform', `translate(${pad - minX}, ${pad - minY})`);
+
+  // ── Real edges ──
+  container.selectAll('.tree-edge')
+    .data(root.links())
+    .join('line')
+    .attr('class', d => {
+      const inP = searchPath.includes(d.source.data.val) && searchPath.includes(d.target.data.val);
+      return `tree-edge ${inP ? 'path-edge' : ''}`;
+    })
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y + NODE_R)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y - NODE_R);
+
+  // ── NIL edges ──
+  container.selectAll('.nil-edge')
+    .data(nilNodes)
+    .join('line')
+    .attr('class', 'nil-edge')
+    .attr('x1', d => d.px).attr('y1', d => d.py + NODE_R)
+    .attr('x2', d => d.x).attr('y2', d => d.y - NIL_H / 2);
+
+  // ── NIL nodes ──
+  const nilG = container.selectAll('.nil-g')
+    .data(nilNodes)
+    .join('g').attr('class', 'nil-g')
+    .attr('transform', d => `translate(${d.x}, ${d.y})`);
+
+  nilG.append('rect')
+    .attr('class', 'nil-box')
+    .attr('x', -NIL_W/2).attr('y', -NIL_H/2)
+    .attr('width', NIL_W).attr('height', NIL_H)
+    .attr('rx', 2);
+
+  nilG.append('rect')
+    .attr('class', 'nil-box-dashed')
+    .attr('x', -NIL_W/2).attr('y', -NIL_H/2)
+    .attr('width', NIL_W).attr('height', NIL_H)
+    .attr('rx', 2);
+
+  nilG.append('text').attr('class', 'nil-label')
+    .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
+    .attr('dy', '-1px')
+    .text('NIL');
+
+  nilG.append('text').attr('class', 'nil-sub')
+    .attr('text-anchor', 'middle').attr('y', NIL_H / 2 + 9)
+    .text('(PRETO)');
+
+  // ── Real nodes ──
+  const nodeG = container.selectAll('.node-g')
+    .data(realNodes)
+    .join('g').attr('class', 'node-g')
+    .attr('transform', d => `translate(${d.x}, ${d.y})`);
+
+  // root rings
+  nodeG.filter(d => d.data === root.data)
+    .each(function(d) {
+      const el = d3.select(this);
+      el.append('circle')
+        .attr('r', NODE_R + 9)
+        .attr('class', 'root-ring2')
+        .attr('stroke', d.data.color === RED ? 'rgba(229,62,62,.35)' : 'rgba(100,100,100,.3)');
+      el.append('circle')
+        .attr('r', NODE_R + 5)
+        .attr('class', 'root-ring1')
+        .attr('stroke', d.data.color === RED ? '#fc8181' : '#888');
+    });
+
+  // search path ring
+  nodeG.filter(d => searchPath.includes(d.data.val) && !highlighted.has(d.data.val))
+    .append('circle').attr('class', 'search-ring').attr('r', NODE_R + 7);
+
+  // highlight ring (last inserted/found)
+  nodeG.filter(d => highlighted.has(d.data.val))
+    .append('circle').attr('class', 'highlight-ring')
+    .attr('r', NODE_R + 10)
+    .attr('stroke', d => d.data.color === RED ? 'rgba(229,62,62,.5)' : 'rgba(80,80,80,.4)');
+
+  // main circle (with shadow via filter)
+  nodeG.append('circle')
+    .attr('class', 'node-circle node-shadow')
+    .attr('r', NODE_R)
+    .attr('fill', d => d.data.color === RED ? '#e53e3e' : '#111111')
+    .attr('stroke', d => d.data.color === RED ? 'rgba(252,129,129,.5)' : 'rgba(255,255,255,.08)');
+
+  // value
+  nodeG.append('text').attr('class', 'node-label')
+    .attr('font-size', d => String(d.data.val).length > 3 ? 11 : 15)
+    .text(d => d.data.val);
+
+  // color label below
+  nodeG.append('text').attr('class', 'node-color-label')
+    .attr('y', NODE_R + 14)
+    .attr('fill', d => d.data.color === RED ? '#e53e3e' : '#999')
+    .text(d => d.data.color === RED ? 'VERMELHO' : 'PRETO');
+
+  // Auto-center on first render if transform is identity
+  const currentT = d3.zoomTransform(svg.node());
+  if (currentT.k === 1 && currentT.x === 0 && currentT.y === 0) {
+    const bw = boardWrap.clientWidth, bh = boardWrap.clientHeight;
+    const scale = Math.min(1, Math.min(bw / (W + pad*2), bh / (H + pad*2)));
+    const tx = (bw - (W + pad*2) * scale) / 2;
+    const ty = 30;
+    svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   UNDO / REDO — snapshot-based history
+═══════════════════════════════════════════════════════ */
+
+// Serialize the RB tree to a plain JSON-friendly array of nodes
+function serializeTree(node) {
+  if (!node) return null;
+  return { val: node.val, color: node.color, left: serializeTree(node.left), right: serializeTree(node.right) };
+}
+
+// Deserialize back to linked RBNode structure
+function deserializeTree(obj) {
+  if (!obj) return null;
+  const n = new RBNode(obj.val);
+  n.color = obj.color;
+  n.left  = deserializeTree(obj.left);
+  n.right = deserializeTree(obj.right);
+  if (n.left)  n.left.parent  = n;
+  if (n.right) n.right.parent = n;
+  return n;
+}
+
+// Each snapshot holds: serialized tree, log entries HTML at that point, last rot
+const history = [];   // array of {treeSnap, logHTML, rot, label}
+let historyPos = -1;  // current position in history (-1 = nothing)
+
+function takeSnapshot(label, rot) {
+  // Drop any redo states ahead of current position
+  if (historyPos < history.length - 1) {
+    history.splice(historyPos + 1);
+  }
+  history.push({
+    treeSnap: serializeTree(tree.root),
+    logHTML:  document.getElementById('log-list').innerHTML,
+    rot:      rot || null,
+    label:    label
+  });
+  historyPos = history.length - 1;
+  updateUndoUI();
+}
+
+function updateUndoUI() {
+  const btnUndo = document.getElementById('btn-undo');
+  const btnRedo = document.getElementById('btn-redo');
+  const ind     = document.getElementById('step-indicator');
+  btnUndo.disabled = historyPos <= 0;
+  btnRedo.disabled = historyPos >= history.length - 1;
+  ind.textContent  = history.length > 0
+    ? `passo ${historyPos + 1} / ${history.length}`
+    : 'passo 0 / 0';
+}
+
+function restoreSnapshot(snap) {
+  // Rebuild tree
+  tree.root = deserializeTree(snap.treeSnap);
+  // Restore log
+  document.getElementById('log-list').innerHTML = snap.logHTML;
+  // Restore rotation diagram
+  drawRotDiagram(snap.rot);
+  // Clear transient state
+  highlighted.clear();
+  searchPath = [];
+  renderTree();
+  updateStats();
+}
+
+function undoStep() {
+  if (historyPos <= 0) return;
+  historyPos--;
+  const snap = history[historyPos];
+  restoreSnapshot(snap);
+  // Add undo log entry (appended, does not modify snapshot log)
+  addLog('Undo', 'b-undo', `↩ Voltou para: ${snap.label}`, [
+    { t: 'ok', s: `Estado restaurado (passo ${historyPos + 1} de ${history.length}).`, reason: null }
+  ]);
+  updateUndoUI();
+}
+
+function redoStep() {
+  if (historyPos >= history.length - 1) return;
+  historyPos++;
+  const snap = history[historyPos];
+  restoreSnapshot(snap);
+  addLog('Redo', 'b-info', `↪ Avançou para: ${snap.label}`, [
+    { t: 'ok', s: `Estado restaurado (passo ${historyPos + 1} de ${history.length}).`, reason: null }
+  ]);
+  updateUndoUI();
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undoStep(); }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redoStep(); }
+});
+
+/* ═══════════════════════════════════════════════════════
+   ACTIONS
+═══════════════════════════════════════════════════════ */
+function insertVal() {
+  const v = parseInt(document.getElementById('val-input').value);
+  if (isNaN(v)) { addLog('Aviso','b-warn','Valor inválido',[{t:'warn',s:'Digite um número inteiro.',reason:null}]); return; }
+  if (v < -9999 || v > 9999) { addLog('Aviso','b-warn','Fora do intervalo',[{t:'warn',s:'Use valores entre -9999 e 9999.',reason:null}]); return; }
+  highlighted.clear(); searchPath = [];
+  const res = tree.insert(v);
+  // Only snapshot if insert actually changed the tree
+  if (res.ops[0].t !== 'warn') {
+    highlighted.add(v);
+    addLog('Inserir','b-insert', res.msg, res.ops);
+    drawRotDiagram(res.rot);
+    renderTree(); updateStats();
+    takeSnapshot(`Inserir ${v}`, res.rot);
+    setTimeout(() => { highlighted.clear(); renderTree(); }, 1400);
+  } else {
+    addLog('Inserir','b-warn', res.msg, res.ops);
+  }
+  document.getElementById('val-input').value = '';
+  document.getElementById('val-input').focus();
+}
+
+function searchVal() {
+  const v = parseInt(document.getElementById('val-input').value);
+  if (isNaN(v)) { addLog('Aviso','b-warn','Valor inválido',[{t:'warn',s:'Digite um número inteiro.',reason:null}]); return; }
+  highlighted.clear();
+  const { found, path } = tree.search(v);
+  searchPath = [...path];
+  if (found) {
+    highlighted.add(v);
+    addLog('Buscar','b-search',`${v} encontrado!`,[
+      { t:'ok', s:`Valor ${v} localizado.`, reason:`Caminho (${path.length} comparação${path.length>1?'ões':''}): ${path.join(' → ')}` }
+    ]);
+  } else {
+    addLog('Buscar','b-search',`${v} não encontrado`,[
+      { t:'warn', s:`Valor ${v} não existe.`, reason:`Caminho até NIL: ${path.join(' → ') || '(árvore vazia)'}` }
+    ]);
+  }
+  renderTree();
+}
+
+function deleteVal() {
+  const v = parseInt(document.getElementById('val-input').value);
+  if (isNaN(v)) { addLog('Aviso','b-warn','Valor inválido',[{t:'warn',s:'Digite um número inteiro.',reason:null}]); return; }
+  highlighted.clear(); searchPath = [];
+  const res = tree.delete(v);
+  addLog('Remover','b-delete', res.msg, res.ops);
+  drawRotDiagram(res.rot);
+  renderTree(); updateStats();
+  if (res.ops[0].t !== 'warn') takeSnapshot(`Remover ${v}`, res.rot);
+  document.getElementById('val-input').value = '';
+}
+
+function clearTree() {
+  tree.root = null; highlighted.clear(); searchPath = [];
+  addLog('Info','b-info','Árvore limpa',[{t:'ok',s:'Todos os nós removidos.',reason:null}]);
+  drawRotDiagram(null);
+  renderTree(); updateStats();
+  takeSnapshot('Limpar árvore', null);
+  svg.call(zoom.transform, d3.zoomIdentity);
+}
+
+function loadPreset(vals) {
+  tree.root = null; highlighted.clear(); searchPath = [];
+  let lastRot = null;
+  vals.forEach(v => { const r = tree.insert(v); if (r.rot) lastRot = r.rot; });
+  addLog('Info','b-info',`Exemplo: [${vals.join(', ')}]`,[
+    { t:'ok',  s:`${vals.length} nós inseridos.`, reason: null },
+    { t:'bal', s:`Altura: ${tree.height()} · Árvore balanceada.`, reason: null }
+  ]);
+  drawRotDiagram(lastRot);
+  svg.call(zoom.transform, d3.zoomIdentity);
+  renderTree(); updateStats();
+  takeSnapshot(`Exemplo [${vals.join(',')}]`, lastRot);
+}
+
+document.getElementById('val-input').addEventListener('keydown', e => { if (e.key === 'Enter') insertVal(); });
+
+/* init */
+renderTree();
+updateStats();
+updateUndoUI();
+window.addEventListener('resize', renderTree);
+</script>
+</body>
+</html>
